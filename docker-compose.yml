@@ -1,0 +1,23 @@
+services:
+  posterbridge:
+    image: ghcr.io/YOUR_GITHUB_USERNAME/posterbridge:latest
+    container_name: posterbridge
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./posterbridge-cache:/app/cache
+    # Optional: cap CPU so app/config.py's effective_cpus()-driven render
+    # pool sizing reflects a real limit rather than the whole host.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "2"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

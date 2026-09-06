@@ -1,0 +1,1442 @@
+# app/sash/awards_data.py
+#
+# Adapted from PostersPlus (https://github.com/UmbraProjects/PostersPlus) awards.py, licensed AGPLv3.
+# This file keeps PostersPlus's curated award ID sets and its MDBList
+# keyword parser and dominant-colour algorithm verbatim; the poster/notch
+# drawing code from the original file has been removed since PosterBridge
+# draws its own sash shape (see app/sash/render.py).
+#
+# Because this file is a derivative of AGPLv3-licensed code, PosterBridge as
+# a whole is licensed AGPLv3 too — see /LICENSE and /NOTICE.md.
+import numpy as np
+from PIL import Image
+from typing import Any
+
+
+class _FetchFailed:
+    """Singleton sentinel returned when a fetch attempt fails."""
+    _instance = None
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    def __repr__(self):
+        return "FETCH_FAILED"
+
+FETCH_FAILED = _FetchFailed()
+
+
+class _RateLimited:
+    """
+    Returned when a fetch was rejected with HTTP 429.
+
+    Carries the parsed Retry-After value (in seconds) when the upstream
+    provided one, so the caller can honour it instead of the default fixed
+    back-off. Always distinct from FETCH_FAILED so the standard retry path
+    skips immediate re-attempts (retrying a 429 is counterproductive).
+    """
+    __slots__ = ("retry_after",)
+
+    def __init__(self, retry_after: float | None = None):
+        self.retry_after = retry_after
+
+    def __repr__(self):
+        return f"RATE_LIMITED(retry_after={self.retry_after})"
+
+
+# ---------------------------------------------------------------------------
+# Emmy winners — hardcoded TMDB IDs
+# Drama, Comedy and Limited Series winners only.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Golden Globe Best Motion Picture – Drama — hardcoded TMDB IDs
+# Sourced from: themoviedb.org/award/4-the-golden-globe-awards/category/7
+# Winners: all years available. Nominees: 2006 onwards (complete data).
+# Update annually after the ceremony.
+# ---------------------------------------------------------------------------
+
+GOLDEN_GLOBE_DRAMA_WINNER_TMDB_IDS: set[int] = {
+    858024,  # Hamnet (2026)
+    549509,  # The Brutalist (2025)
+    872585,  # Oppenheimer (2024)
+    804095,  # The Fabelmans (2023)
+    600583,  # The Power of the Dog (2022)
+    581734,  # Nomadland (2021)
+    530915,  # 1917 (2020)
+    424694,  # Bohemian Rhapsody (2019)
+    359940,  # Three Billboards Outside Ebbing, Missouri (2018)
+    376867,  # Moonlight (2017)
+    281957,  # The Revenant (2016)
+    85350,   # Boyhood (2015)
+    76203,   # 12 Years a Slave (2014)
+    68734,   # Argo (2013)
+    65057,   # The Descendants (2012)
+    37799,   # The Social Network (2011)
+    19995,   # Avatar (2010)
+    12405,   # Slumdog Millionaire (2009)
+    4347,    # Atonement (2008)
+    1164,    # Babel (2007)
+    142,     # Brokeback Mountain (2006)
+    2567,    # The Aviator (2005)
+    122,     # The Lord of the Rings: The Return of the King (2004)
+    13,      # Forrest Gump (1995)
+    279,     # Amadeus (1985)
+    826,     # The Bridge on the River Kwai (1958)
+    2897,    # Around the World in 80 Days (1957)
+    220,     # East of Eden (1956)
+    654,     # On the Waterfront (1955)
+    29912,   # The Robe (1954)
+    27191,   # The Greatest Show on Earth (1953)
+    25673,   # A Place in the Sun (1952)
+}
+
+GOLDEN_GLOBE_DRAMA_NOM_TMDB_IDS: set[int] = {
+    # 2026 (83rd)
+    1062722,  # Frankenstein
+    1456349,  # It Was Just an Accident
+    1220564,  # The Secret Agent
+    1124566,  # Sentimental Value
+    1233413,  # Sinners
+    # 2025 (82nd)
+    661539,   # A Complete Unknown
+    974576,   # Conclave
+    693134,   # Dune: Part Two
+    1028196,  # Nickel Boys
+    1211472,  # September 5
+    # 2024 (81st)
+    915935,   # Anatomy of a Fall
+    466420,   # Killers of the Flower Moon
+    523607,   # Maestro
+    666277,   # Past Lives
+    467244,   # The Zone of Interest
+    # 2023 (80th)
+    76600,    # Avatar: The Way of Water
+    614934,   # Elvis
+    817758,   # TÁR
+    361743,   # Top Gun: Maverick
+    # 2022 (79th)
+    777270,   # Belfast
+    776503,   # CODA
+    438631,   # Dune
+    614917,   # King Richard
+    # 2021 (78th)
+    600354,   # The Father
+    614560,   # Mank
+    582014,   # Promising Young Woman
+    556984,   # The Trial of the Chicago 7
+    # 2020 (77th)
+    398978,   # The Irishman
+    475557,   # Joker
+    492188,   # Marriage Story
+    551332,   # The Two Popes
+    # 2019 (76th)
+    284054,   # Black Panther
+    487558,   # BlacKkKlansman
+    465914,   # If Beale Street Could Talk
+    332562,   # A Star Is Born
+    # 2018 (75th)
+    398818,   # Call Me by Your Name
+    374720,   # Dunkirk
+    446354,   # The Post
+    399055,   # The Shape of Water
+    # 2017 (74th)
+    324786,   # Hacksaw Ridge
+    338766,   # Hell or High Water
+    334543,   # Lion
+    334541,   # Manchester by the Sea
+    # 2016 (73rd)
+    258480,   # Carol
+    76341,    # Mad Max: Fury Road
+    264644,   # Room
+    314365,   # Spotlight
+    # 2015 (72nd)
+    87492,    # Foxcatcher
+    205596,   # The Imitation Game
+    273895,   # Selma
+    266856,   # The Theory of Everything
+    # 2014 (71st)
+    109424,   # Captain Phillips
+    49047,    # Gravity
+    205220,   # Philomena
+    96721,    # Rush
+    # 2013 (70th)
+    68718,    # Django Unchained
+    87827,    # Life of Pi
+    72976,    # Lincoln
+    97630,    # Zero Dark Thirty
+    # 2012 (69th)
+    50014,    # The Help
+    44826,    # Hugo
+    10316,    # The Ides of March
+    60308,    # Moneyball
+    57212,    # War Horse
+    # 2011 (68th)
+    44214,    # Black Swan
+    45317,    # The Fighter
+    27205,    # Inception
+    45269,    # The King's Speech
+    # 2010 (67th)
+    12162,    # The Hurt Locker
+    16869,    # Inglourious Basterds
+    25793,    # Precious
+    22947,    # Up in the Air
+    # 2009 (66th)
+    4922,     # The Curious Case of Benjamin Button
+    11499,    # Frost/Nixon
+    8055,     # The Reader
+    4148,     # Revolutionary Road
+    # 2008 (65th)
+    4982,     # American Gangster
+    2252,     # Eastern Promises
+    14047,    # The Great Debaters
+    4566,     # Michael Clayton
+    6977,     # No Country for Old Men
+    7345,     # There Will Be Blood
+    # 2007 (64th)
+    10741,    # Bobby
+    1422,     # The Departed
+    1440,     # Little Children
+    1165,     # The Queen
+    # 2006 (63rd)
+    1985,     # The Constant Gardener
+    3291,     # Good Night, and Good Luck.
+    59,       # A History of Violence
+    116,      # Match Point
+}
+
+# ---------------------------------------------------------------------------
+# Golden Globe Best Motion Picture – Musical or Comedy — hardcoded TMDB IDs
+# Sourced from: themoviedb.org/award/4-the-golden-globe-awards/category/8
+# Winners: all years available. Nominees: 2006 onwards.
+# ---------------------------------------------------------------------------
+
+GOLDEN_GLOBE_COMEDY_WINNER_TMDB_IDS: set[int] = {
+    1054867,  # One Battle After Another (2026)
+    974950,   # Emilia Pérez (2025)
+    792307,   # Poor Things (2024)
+    674324,   # The Banshees of Inisherin (2023)
+    511809,   # West Side Story (2022)
+    740985,   # Borat Subsequent Moviefilm (2021)
+    466272,   # Once Upon a Time... in Hollywood (2020)
+    490132,   # Green Book (2019)
+    391713,   # Lady Bird (2018)
+    313369,   # La La Land (2017)
+    286217,   # The Martian (2016)
+    120467,   # The Grand Budapest Hotel (2015)
+    168672,   # American Hustle (2014)
+    82695,    # Les Misérables (2013)
+    74643,    # The Artist (2012)
+    39781,    # The Kids Are All Right (2011)
+    18785,    # The Hangover (2010)
+    5038,     # Vicky Cristina Barcelona (2009)
+    13885,    # Sweeney Todd (2008)
+    1125,     # Dreamgirls (2007)
+    69,       # Walk the Line (2006)
+    9675,     # Sideways (2005)
+    153,      # Lost in Translation (2004)
+    8587,     # The Lion King (1995)
+    9326,     # Romancing the Stone (1985)
+    16520,    # The King and I (1957)
+    4825,     # Guys and Dolls (1956)
+    51044,    # Carmen Jones (1955)
+    65787,    # With a Song in My Heart (1953)
+    2769,     # An American in Paris (1952)
+}
+
+GOLDEN_GLOBE_COMEDY_NOM_TMDB_IDS: set[int] = {
+    # 2026 (83rd)
+    1299655,  # Blue Moon
+    701387,   # Bugonia
+    1317288,  # Marty Supreme
+    639988,   # No Other Choice
+    1254808,  # Nouvelle Vague
+    # 2025 (82nd)
+    1013850,  # A Real Pain
+    1064213,  # Anora
+    937287,   # Challengers
+    933260,   # The Substance
+    402431,   # Wicked
+    # 2024 (81st)
+    964980,   # Air
+    1056360,  # American Fiction
+    346698,   # Barbie
+    840430,   # The Holdovers
+    839369,   # May December
+    # 2023 (80th)
+    615777,   # Babylon
+    545611,   # Everything Everywhere All at Once
+    661374,   # Glass Onion: A Knives Out Mystery
+    497828,   # Triangle of Sadness
+    # 2022 (79th)
+    730047,   # Cyrano
+    646380,   # Don't Look Up
+    718032,   # Licorice Pizza
+    537116,   # tick, tick... BOOM!
+    # 2021 (78th)
+    556574,   # Hamilton
+    586101,   # Music
+    587792,   # Palm Springs
+    611213,   # The Prom
+    # 2020 (77th)
+    528888,   # Dolemite Is My Name
+    515001,   # Jojo Rabbit
+    546554,   # Knives Out
+    504608,   # Rocketman
+    # 2019 (76th)
+    455207,   # Crazy Rich Asians
+    375262,   # The Favourite
+    400650,   # Mary Poppins Returns
+    429197,   # Vice
+    # 2018 (75th)
+    371638,   # The Disaster Artist
+    419430,   # Get Out
+    316029,   # The Greatest Showman
+    389015,   # I, Tonya
+    # 2017 (74th)
+    342737,   # 20th Century Women
+    293660,   # Deadpool
+    315664,   # Florence Foster Jenkins
+    369557,   # Sing Street
+    # 2016 (73rd)
+    318846,   # The Big Short
+    274479,   # Joy
+    238713,   # Spy
+    271718,   # Trainwreck
+    # 2015 (72nd)
+    194662,   # Birdman
+    224141,   # Into the Woods
+    234200,   # Pride
+    239563,   # St. Vincent
+    # 2014 (71st)
+    152601,   # Her
+    86829,    # Inside Llewyn Davis
+    129670,   # Nebraska
+    106646,   # The Wolf of Wall Street
+    # 2013 (70th)
+    74534,    # The Best Exotic Marigold Hotel
+    83666,    # Moonrise Kingdom
+    81025,    # Salmon Fishing in the Yemen
+    82693,    # Silver Linings Playbook
+    # 2012 (69th)
+    40807,    # 50/50
+    55721,    # Bridesmaids
+    59436,    # Midnight in Paris
+    75900,    # My Week with Marilyn
+    # 2011 (68th)
+    12155,    # Alice in Wonderland
+    42297,    # Burlesque
+    39514,    # RED
+    37710,    # The Tourist
+    # 2010 (67th)
+    19913,    # (500) Days of Summer
+    22897,    # It's Complicated
+    24803,    # Julie & Julia
+    10197,    # Nine
+    # 2009 (66th)
+    4944,     # Burn After Reading
+    10503,    # Happy-Go-Lucky
+    8321,     # In Bruges
+    11631,    # Mamma Mia!
+    # 2008 (65th)
+    4688,     # Across the Universe
+    6538,     # Charlie Wilson's War
+    2976,     # Hairspray
+    7326,     # Juno
+    # 2007 (64th)
+    496,      # Borat: Cultural Learnings of America
+    350,      # The Devil Wears Prada
+    773,      # Little Miss Sunshine
+    9388,     # Thank You for Smoking
+    # 2006 (63rd)
+    10773,    # Mrs. Henderson Presents
+    4348,     # Pride & Prejudice
+    9899,     # The Producers
+    10707,    # The Squid and the Whale
+}
+
+# ---------------------------------------------------------------------------
+# Golden Globe Best Television Series – Drama — hardcoded TMDB IDs
+# Sourced from: themoviedb.org/award/4-the-golden-globe-awards/category/42
+# Winners: all years available. Nominees: 2006 onwards.
+# ---------------------------------------------------------------------------
+
+GOLDEN_GLOBE_TV_DRAMA_WINNER_TMDB_IDS: set[int] = {
+    250307,   # The Pitt (2026)
+    126308,   # Shōgun (2025)
+    76331,    # Succession (2024 & 2022 & 2020)
+    94997,    # House of the Dragon (2023)
+    65494,    # The Crown (2021 & 2017)
+    46533,    # The Americans (2019)
+    69478,    # The Handmaid's Tale (2018)
+    62560,    # Mr. Robot (2016)
+    61463,    # The Affair (2015)
+    1396,     # Breaking Bad (2014)
+    1407,     # Homeland (2013 & 2012)
+    1621,     # Boardwalk Empire (2011)
+    1104,     # Mad Men (2010 & 2009 & 2008)
+    1416,     # Grey's Anatomy (2007)
+    4607,     # Lost (2006)
+    3750,     # Nip/Tuck (2005)
+}
+
+GOLDEN_GLOBE_TV_DRAMA_NOM_TMDB_IDS: set[int] = {
+    # 2026 (83rd)
+    203857,   # The Diplomat
+    225171,   # Pluribus
+    95396,    # Severance
+    95480,    # Slow Horses
+    111803,   # The White Lotus
+    # 2025 (82nd)
+    222766,   # The Day of the Jackal
+    203857,   # The Diplomat
+    118642,   # Mr. & Mrs. Smith
+    95480,    # Slow Horses
+    93405,    # Squid Game
+    # 2024 (81st)
+    157744,   # 1923
+    65494,    # The Crown
+    203857,   # The Diplomat
+    100088,   # The Last of Us
+    90282,    # The Morning Show
+    # 2023 (80th)
+    60059,    # Better Call Saul
+    65494,    # The Crown
+    69740,    # Ozark
+    95396,    # Severance
+    # 2022 (79th)
+    96677,    # Lupin
+    90282,    # The Morning Show
+    79084,    # POSE
+    93405,    # Squid Game
+    # 2021 (78th)
+    82816,    # Lovecraft Country
+    82856,    # The Mandalorian
+    69740,    # Ozark
+    81354,    # Ratched
+    # 2020 (77th)
+    66292,    # Big Little Lies
+    65494,    # The Crown
+    72750,    # Killing Eve
+    90282,    # The Morning Show
+    # 2019 (76th)
+    80307,    # Bodyguard
+    80335,    # Homecoming
+    72750,    # Killing Eve
+    79084,    # POSE
+    # 2018 (75th)
+    65494,    # The Crown
+    1399,     # Game of Thrones
+    66732,    # Stranger Things
+    67136,    # This Is Us
+    # 2017 (74th)
+    1399,     # Game of Thrones
+    66732,    # Stranger Things
+    67136,    # This Is Us
+    63247,    # Westworld
+    # 2016 (73rd)
+    61733,    # Empire
+    1399,     # Game of Thrones
+    63351,    # Narcos
+    56570,    # Outlander
+    # 2015 (72nd)
+    33907,    # Downton Abbey
+    1399,     # Game of Thrones
+    1435,     # The Good Wife
+    1425,     # House of Cards
+    # 2014 (71st)
+    33907,    # Downton Abbey
+    1435,     # The Good Wife
+    1425,     # House of Cards
+    58937,    # Masters of Sex
+    # 2013 (70th)
+    1396,     # Breaking Bad
+    1621,     # Boardwalk Empire
+    33907,    # Downton Abbey
+    15621,    # The Newsroom
+    # 2012 (69th)
+    1413,     # American Horror Story
+    1621,     # Boardwalk Empire
+    38922,    # Boss
+    1399,     # Game of Thrones
+    # 2011 (68th)
+    1405,     # Dexter
+    1435,     # The Good Wife
+    1104,     # Mad Men
+    1402,     # The Walking Dead
+    # 2010 (67th)
+    4392,     # Big Love
+    1405,     # Dexter
+    1408,     # House
+    10545,    # True Blood
+    # 2009 (66th)
+    1405,     # Dexter
+    1408,     # House
+    14069,    # In Treatment
+    10545,    # True Blood
+    # 2008 (65th)
+    4392,     # Big Love
+    4920,     # Damages
+    1416,     # Grey's Anatomy
+    1408,     # House
+    2942,     # The Tudors
+    # 2007 (64th)
+    1973,     # 24
+    4392,     # Big Love
+    1639,     # Heroes
+    4607,     # Lost
+    # 2006 (63rd)
+    4015,     # Commander in Chief
+    1416,     # Grey's Anatomy
+    2288,     # Prison Break
+    1891,     # Rome
+}
+
+# ---------------------------------------------------------------------------
+# Golden Globe Best Television Series – Musical or Comedy — hardcoded TMDB IDs
+# Sourced from: themoviedb.org/award/4-the-golden-globe-awards/category/43
+# Winners: all years available. Nominees: 2006 onwards.
+# ---------------------------------------------------------------------------
+
+GOLDEN_GLOBE_TV_COMEDY_WINNER_TMDB_IDS: set[int] = {
+    247767,   # The Studio (2026)
+    124101,   # Hacks (2025 & 2022)
+    136315,   # The Bear (2024)
+    125935,   # Abbott Elementary (2023)
+    61662,    # Schitt's Creek (2021)
+    67070,    # Fleabag (2020)
+    81290,    # The Kominsky Method (2019)
+    70796,    # The Marvelous Mrs. Maisel (2018)
+    65495,    # Atlanta (2017)
+    61744,    # Mozart in the Jungle (2016)
+    61406,    # Transparent (2015)
+    48891,    # Brooklyn Nine-Nine (2014)
+    42282,    # Girls (2013)
+    1421,     # Modern Family (2012)
+    1417,     # Glee (2011 & 2010)
+    4608,     # 30 Rock (2009)
+    2693,     # Extras (2008)
+    4626,     # Ugly Betty (2007)
+    693,      # Desperate Housewives (2006 & 2005)
+}
+
+GOLDEN_GLOBE_TV_COMEDY_NOM_TMDB_IDS: set[int] = {
+    # 2026 (83rd)
+    125935,   # Abbott Elementary
+    124101,   # Hacks
+    250923,   # Nobody Wants This
+    107113,   # Only Murders in the Building
+    136315,   # The Bear
+    # 2025 (82nd)
+    125935,   # Abbott Elementary
+    136315,   # The Bear
+    236235,   # The Gentlemen
+    250923,   # Nobody Wants This
+    107113,   # Only Murders in the Building
+    # 2024 (81st)
+    125935,   # Abbott Elementary
+    73107,    # Barry
+    222023,   # Jury Duty
+    107113,   # Only Murders in the Building
+    97546,    # Ted Lasso
+    # 2023 (80th)
+    136315,   # The Bear
+    124101,   # Hacks
+    107113,   # Only Murders in the Building
+    119051,   # Wednesday
+    # 2022 (79th)
+    93812,    # The Great
+    107113,   # Only Murders in the Building
+    95215,    # Reservation Dogs
+    97546,    # Ted Lasso
+    # 2021 (78th)
+    82596,    # Emily in Paris
+    93287,    # The Flight Attendant
+    93812,    # The Great
+    97546,    # Ted Lasso
+    # 2020 (77th)
+    73107,    # Barry
+    81290,    # The Kominsky Method
+    70796,    # The Marvelous Mrs. Maisel
+    83127,    # The Politician
+    # 2019 (76th)
+    73107,    # Barry
+    66573,    # The Good Place
+    73925,    # Kidding
+    70796,    # The Marvelous Mrs. Maisel
+    # 2018 (75th)
+    61381,    # black-ish
+    64254,    # Master of None
+    71733,    # SMILF
+    74321,    # Will & Grace
+    # 2017 (74th)
+    61381,    # black-ish
+    61744,    # Mozart in the Jungle
+    61406,    # Transparent
+    2947,     # Veep
+    # 2016 (73rd)
+    64043,    # Casual
+    1424,     # Orange Is the New Black
+    60573,    # Silicon Valley
+    61406,    # Transparent
+    2947,     # Veep
+    # 2015 (72nd)
+    42282,    # Girls
+    61418,    # Jane the Virgin
+    1424,     # Orange Is the New Black
+    60573,    # Silicon Valley
+    # 2014 (71st)
+    1418,     # The Big Bang Theory
+    42282,    # Girls
+    1421,     # Modern Family
+    8592,     # Parks and Recreation
+    # 2013 (70th)
+    1418,     # The Big Bang Theory
+    31841,    # Episodes
+    1421,     # Modern Family
+    39325,    # Smash
+    # 2012 (69th)
+    34594,    # Enlightened
+    31841,    # Episodes
+    1417,     # Glee
+    1420,     # New Girl
+    # 2011 (68th)
+    4608,     # 30 Rock
+    1418,     # The Big Bang Theory
+    32406,    # The Big C
+    1421,     # Modern Family
+    18053,    # Nurse Jackie
+    # 2010 (67th)
+    4608,     # 30 Rock
+    1940,     # Entourage
+    1421,     # Modern Family
+    2316,     # The Office
+    # 2009 (66th)
+    1215,     # Californication
+    1940,     # Entourage
+    2316,     # The Office
+    186,      # Weeds
+    # 2008 (65th)
+    4608,     # 30 Rock
+    1215,     # Californication
+    1940,     # Entourage
+    5639,     # Pushing Daisies
+    # 2007 (64th)
+    693,      # Desperate Housewives
+    1940,     # Entourage
+    2316,     # The Office
+    186,      # Weeds
+    # 2006 (63rd)
+    4546,     # Curb Your Enthusiasm
+    1940,     # Entourage
+    252,      # Everybody Hates Chris
+    2317,     # My Name Is Earl
+    186,      # Weeds
+}
+
+# ---------------------------------------------------------------------------
+# Golden Globe Best Television Limited/Anthology Series — hardcoded TMDB IDs
+# Sourced from: themoviedb.org/award/4-the-golden-globe-awards/category/44
+# Winners: all years available. Nominees: 2006 onwards.
+# ---------------------------------------------------------------------------
+
+GOLDEN_GLOBE_TV_LIMITED_WINNER_TMDB_IDS: set[int] = {
+    249042,   # Adolescence (2026)
+    241259,   # Baby Reindeer (2025)
+    154385,   # BEEF (2024)
+    111803,   # The White Lotus (2023)
+    80039,    # The Underground Railroad (2022)
+    87739,    # The Queen's Gambit (2021)
+    87108,    # Chernobyl (2020)
+    64513,    # American Crime Story (2019 & 2017)
+    66292,    # Big Little Lies (2018)
+    61697,    # Wolf Hall (2016)
+    41693,    # Carlos (2011)
+    15114,    # John Adams (2009)
+    13291,    # Elizabeth I (2007)
+    14968,    # Empire Falls (2006)
+}
+
+GOLDEN_GLOBE_TV_LIMITED_NOM_TMDB_IDS: set[int] = {
+    # 2026 (83rd)
+    246386,   # All Her Fault
+    241405,   # Dying for Sex
+    250504,   # The Beast in Me
+    253376,   # The Girlfriend
+    42009,    # Black Mirror
+    # 2025 (82nd)
+    147050,   # Disclaimer
+    225634,   # Monsters: The Lyle and Erik Menendez Story
+    194764,   # The Penguin
+    94028,    # RIPLEY
+    46648,    # True Detective
+    # 2024 (81st)
+    155421,   # All the Light We Cannot See
+    95555,    # Daisy Jones & the Six
+    60622,    # Fargo
+    216089,   # Fellow Travelers
+    117303,   # Lessons in Chemistry
+    # 2023 (80th)
+    155537,   # Black Bird
+    113988,   # DAHMER - Monster: The Jeffrey Dahmer Story
+    122066,   # The Dropout
+    114925,   # Pam & Tommy
+    # 2022 (79th)
+    110695,   # Dopesick
+    64513,    # American Crime Story
+    111141,   # Maid
+    115004,   # Mare of Easttown
+    # 2021 (78th)
+    89905,    # Normal People
+    90705,    # Small Axe
+    83851,    # The Undoing
+    99581,    # Unorthodox
+    # 2020 (77th)
+    82744,    # Catch-22
+    81131,    # Fosse/Verdon
+    80443,    # The Loudest Voice
+    91275,    # Unbelievable
+    # 2019 (76th)
+    71769,    # The Alienist
+    72039,    # Escape at Dannemora
+    70453,    # Sharp Objects
+    79299,    # A Very English Scandal
+    # 2018 (75th)
+    60622,    # Fargo
+    69851,    # FEUD
+    39852,    # The Sinner
+    46638,    # Top of the Lake
+    # 2017 (74th)
+    60791,    # American Crime
+    61859,    # The Night Manager
+    66276,    # The Night Of
+    # 2016 (73rd)
+    60791,    # American Crime
+    1413,     # American Horror Story
+    60622,    # Fargo
+    62516,    # Flesh and Bone
+    # 2011 (68th)
+    16997,    # The Pacific
+    33234,    # The Pillars of the Earth
+    # 2007 (64th)
+    2489,     # Bleak House
+    20056,    # Broken Trail
+    # 2006 (63rd)
+    11099,    # Into the West
+}
+
+# ---------------------------------------------------------------------------
+# Emmy Outstanding Drama / Comedy / Limited Series — nominees only
+# Sourced from: themoviedb.org/award/82-emmy-awards (categories 1, 2, 3)
+# Replaces the generic emmy-award-nominated keyword which captures all Emmy
+# nominations across every category (acting, directing, writing, etc.).
+# Winners are already captured in EMMY_WINNER_TMDB_IDS above.
+# Update annually after the Emmy ceremony.
+# ---------------------------------------------------------------------------
+
+EMMY_DRAMA_NOM_TMDB_IDS: set[int] = {
+    # 2025 (77th)
+    83867,    # Star Wars: Andor
+    203857,   # The Diplomat
+    100088,   # The Last of Us
+    245927,   # Paradise
+    95396,    # Severance
+    95480,    # Slow Horses
+    111803,   # The White Lotus
+    # 2024 (76th)
+    65494,    # The Crown
+    106379,   # Fallout
+    81723,    # The Gilded Age
+    90282,    # The Morning Show
+    118642,   # Mr. & Mrs. Smith
+    108545,   # 3 Body Problem
+    # 2023 (75th)
+    60059,    # Better Call Saul
+    94997,    # House of the Dragon
+    117488,   # Yellowjackets
+    # 2022 (74th)
+    85552,    # Euphoria
+    69740,    # Ozark
+    93405,    # Squid Game
+    66732,    # Stranger Things
+    # 2021 (73rd)
+    91239,    # Bridgerton
+    82816,    # Lovecraft Country
+    79084,    # POSE
+    76479,    # The Boys
+    82856,    # The Mandalorian
+    67136,    # This Is Us
+    # 2020 (72nd)
+    72750,    # Killing Eve
+    # 2019 (71st)
+    80307,    # Bodyguard
+    72750,    # Killing Eve
+    69740,    # Ozark
+    79084,    # POSE
+    76331,    # Succession
+    # 2018 (70th)
+    67136,    # This Is Us
+    66732,    # Stranger Things
+    46533,    # The Americans
+    63247,    # Westworld
+    # 2017 (69th)
+    67136,    # This Is Us
+    60059,    # Better Call Saul
+    1425,     # House of Cards
+    66732,    # Stranger Things
+    63247,    # Westworld
+    # 2016 (68th)
+    60059,    # Better Call Saul
+    33907,    # Downton Abbey
+    1425,     # House of Cards
+    62560,    # Mr. Robot
+    46533,    # The Americans
+    # 2015 (67th)
+    60059,    # Better Call Saul
+    33907,    # Downton Abbey
+    1425,     # House of Cards
+    1104,     # Mad Men
+    1424,     # Orange Is the New Black
+    # 2014 (66th)
+    33907,    # Downton Abbey
+    1425,     # House of Cards
+    1104,     # Mad Men
+    46648,    # True Detective
+    # 2013 (65th)
+    33907,    # Downton Abbey
+    1425,     # House of Cards
+    1104,     # Mad Men
+    # 2012 (64th)
+    1621,     # Boardwalk Empire
+    33907,    # Downton Abbey
+    1104,     # Mad Men
+    # 2011 (63rd)
+    1621,     # Boardwalk Empire
+    1405,     # Dexter
+    4278,     # Friday Night Lights
+}
+
+EMMY_COMEDY_NOM_TMDB_IDS: set[int] = {
+    # 2025 (77th)
+    125935,   # Abbott Elementary
+    136315,   # The Bear
+    124101,   # Hacks
+    250923,   # Nobody Wants This
+    107113,   # Only Murders in the Building
+    136311,   # Shrinking
+    83631,    # What We Do in the Shadows
+    # 2024 (76th)
+    125935,   # Abbott Elementary
+    136315,   # The Bear
+    4546,     # Curb Your Enthusiasm
+    107113,   # Only Murders in the Building
+    157367,   # Palm Royale
+    95215,    # Reservation Dogs
+    83631,    # What We Do in the Shadows
+    # 2023 (75th)
+    125935,   # Abbott Elementary
+    73107,    # Barry
+    222023,   # Jury Duty
+    70796,    # The Marvelous Mrs. Maisel
+    107113,   # Only Murders in the Building
+    97546,    # Ted Lasso
+    119051,   # Wednesday
+    # 2022 (74th)
+    125935,   # Abbott Elementary
+    73107,    # Barry
+    4546,     # Curb Your Enthusiasm
+    124101,   # Hacks
+    70796,    # The Marvelous Mrs. Maisel
+    107113,   # Only Murders in the Building
+    83631,    # What We Do in the Shadows
+    # 2021 (73rd)
+    77169,    # Cobra Kai
+    82596,    # Emily in Paris
+    85702,    # PEN15
+    93287,    # The Flight Attendant
+    81290,    # The Kominsky Method
+    61381,    # black-ish
+    # 2020 (72nd)
+    4546,     # Curb Your Enthusiasm
+    81357,    # Dead to Me
+    67883,    # Insecure
+    66573,    # The Good Place
+    81290,    # The Kominsky Method
+    70796,    # The Marvelous Mrs. Maisel
+    83631,    # What We Do in the Shadows
+    # 2019 (71st)
+    73107,    # Barry
+    84977,    # Russian Doll
+    61662,    # Schitt's Creek
+    66573,    # The Good Place
+    70796,    # The Marvelous Mrs. Maisel
+    2947,     # Veep
+    # 2018 (70th)
+    65495,    # Atlanta
+    73107,    # Barry
+    4546,     # Curb Your Enthusiasm
+    70573,    # GLOW
+    60573,    # Silicon Valley
+    61671,    # Unbreakable Kimmy Schmidt
+    61381,    # black-ish
+    # 2017 (69th)
+    65495,    # Atlanta
+    64254,    # Master of None
+    1421,     # Modern Family
+    60573,    # Silicon Valley
+    61671,    # Unbreakable Kimmy Schmidt
+    61381,    # black-ish
+    # 2016 (68th)
+    64254,    # Master of None
+    1421,     # Modern Family
+    60573,    # Silicon Valley
+    61406,    # Transparent
+    61671,    # Unbreakable Kimmy Schmidt
+    61381,    # black-ish
+    # 2015 (67th)
+    32962,    # Louie
+    1421,     # Modern Family
+    8592,     # Parks and Recreation
+    60573,    # Silicon Valley
+    61406,    # Transparent
+    61671,    # Unbreakable Kimmy Schmidt
+    # 2014 (66th)
+    32962,    # Louie
+    1424,     # Orange Is the New Black
+    60573,    # Silicon Valley
+    1418,     # The Big Bang Theory
+    # 2013 (65th)
+    4608,     # 30 Rock
+    42282,    # Girls
+    32962,    # Louie
+    1418,     # The Big Bang Theory
+    2947,     # Veep
+    # 2012 (64th)
+    4608,     # 30 Rock
+    4546,     # Curb Your Enthusiasm
+    42282,    # Girls
+    1418,     # The Big Bang Theory
+    2947,     # Veep
+    # 2011 (63rd)
+    4608,     # 30 Rock
+    1417,     # Glee
+    8592,     # Parks and Recreation
+    1418,     # The Big Bang Theory
+    2316,     # The Office
+}
+
+EMMY_LIMITED_NOM_TMDB_IDS: set[int] = {
+    # 2025 (77th)
+    42009,    # Black Mirror
+    241405,   # Dying for Sex
+    225634,   # Monsters: The Lyle and Erik Menendez Story
+    194764,   # The Penguin
+    # 2024 (76th)
+    60622,    # Fargo
+    117303,   # Lessons in Chemistry
+    94028,    # RIPLEY
+    46648,    # True Detective
+    # 2023 (75th)
+    113988,   # DAHMER - Monster: The Jeffrey Dahmer Story
+    95555,    # Daisy Jones & the Six
+    156401,   # Fleishman Is in Trouble
+    92830,    # Obi-Wan Kenobi
+    # 2022 (74th)
+    110695,   # Dopesick
+    122066,   # The Dropout
+    95665,    # Inventing Anna
+    114925,   # Pam & Tommy
+    # 2021 (73rd)
+    102619,   # I May Destroy You
+    115004,   # Mare of Easttown
+    80039,    # The Underground Railroad
+    85271,    # WandaVision
+    # 2020 (72nd)
+    90257,    # Little Fires Everywhere
+    83605,    # Mrs. America
+    91275,    # Unbelievable
+    99581,    # Unorthodox
+    # 2019 (71st)
+    72039,    # Escape at Dannemora
+    81131,    # Fosse/Verdon
+    70453,    # Sharp Objects
+    81355,    # When They See Us
+    # 2018 (70th)
+    70128,    # Genius
+    73467,    # Godless
+    72787,    # Patrick Melrose
+    71769,    # The Alienist
+    # 2017 (69th)
+    69851,    # FEUD
+    66276,    # The Night Of
+    # 2016 (68th)
+    60791,    # American Crime
+    66606,    # Roots
+    61859,    # The Night Manager
+    # 2015 (67th)
+    1413,     # American Horror Story
+    61123,    # The Honourable Woman
+    # 2014 (66th)
+    62829,    # Bonnie & Clyde
+    1426,     # Luther
+    57092,    # The White Queen
+    17967,    # Treme
+    # 2010 (62nd)
+    14264,    # Cranford
+    # 2009 (61st)
+    17035,    # Generation Kill
+    # 2008 (60th)
+    19997,    # The Andromeda Strain
+    12584,    # Tin Man
+    # 2007 (59th)
+    5900,     # The Starter Wife
+    2583,     # Prime Suspect
+    # 2006 (58th)
+    2489,     # Bleak House
+    11099,    # Into the West
+    2409,     # Sleeper Cell
+    # 2004 (56th)
+    22859,    # American Family
+    814,      # Hornblower
+    13261,    # Traffic
+    # 2003 (55th)
+    46976,    # Hitler: The Rise of Evil
+    2701,     # Napoleon
+    # 2002 (54th)
+    73536,    # Dinotopia
+    13729,    # Shackleton
+    5256,     # The Mists of Avalon
+    # 2001 (53rd)
+    46679,    # Further Tales of the City
+    75577,    # Life with Judy Garland: Me and My Shadows
+    7389,     # Nuremberg
+    # 2000 (52nd)
+    20658,    # Arabian Nights
+    47059,    # Jesus
+    37542,    # The Beach Boys: An American Family
+    47058,    # P.T. Barnum
+    # 1999 (51st)
+    286423,   # Great Expectations
+    16133,    # Joan of Arc
+    303676,   # The '60s
+    9290,     # The Temptations
+}
+
+# ---------------------------------------------------------------------------
+# Combined lookup sets — used in parse_mdblist_awards for O(1) checks
+# ---------------------------------------------------------------------------
+
+_GG_ALL_WINNERS: set[int] = (
+    GOLDEN_GLOBE_DRAMA_WINNER_TMDB_IDS
+    | GOLDEN_GLOBE_COMEDY_WINNER_TMDB_IDS
+    | GOLDEN_GLOBE_TV_DRAMA_WINNER_TMDB_IDS
+    | GOLDEN_GLOBE_TV_COMEDY_WINNER_TMDB_IDS
+    | GOLDEN_GLOBE_TV_LIMITED_WINNER_TMDB_IDS
+)
+
+_GG_ALL_NOMS: set[int] = (
+    GOLDEN_GLOBE_DRAMA_NOM_TMDB_IDS
+    | GOLDEN_GLOBE_COMEDY_NOM_TMDB_IDS
+    | GOLDEN_GLOBE_TV_DRAMA_NOM_TMDB_IDS
+    | GOLDEN_GLOBE_TV_COMEDY_NOM_TMDB_IDS
+    | GOLDEN_GLOBE_TV_LIMITED_NOM_TMDB_IDS
+)
+
+_EMMY_ALL_NOMS: set[int] = (
+    EMMY_DRAMA_NOM_TMDB_IDS
+    | EMMY_COMEDY_NOM_TMDB_IDS
+    | EMMY_LIMITED_NOM_TMDB_IDS
+)
+
+# ---------------------------------------------------------------------------
+# Emmy winners — hardcoded TMDB IDs
+# Drama, Comedy and Limited Series winners only.
+# ---------------------------------------------------------------------------
+
+EMMY_WINNER_TMDB_IDS: set[int] = {
+    # Comedy
+    247767,  # The Studio
+    124101,  # Hacks
+    136315,  # The Bear
+    97546,   # Ted Lasso
+    61662,   # Schitt's Creek
+    67070,   # Fleabag
+    70796,   # The Marvelous Mrs Maisel
+    2947,    # Veep
+    1421,    # Modern Family
+    4608,    # 30 Rock
+    2316,    # The Office
+    2140,    # Everybody Loves Raymond
+    4589,    # Arrested Development
+    1668,    # Friends
+    105,     # Sex and the City
+    4454,    # Will & Grace
+    1480,    # Ally McBeal
+    3452,    # Frasier
+    1400,    # Seinfeld
+    3219,    # Murphy Brown
+    141,     # Cheers
+    4500,    # The Wonder Years
+    1678,    # The Golden Girls
+    1759,    # The Cosby Show
+    3253,    # Barney Miller
+    2251,    # Taxi
+    1922,    # All in the Family
+    2962,    # The Mary Tyler Moore Show
+    918,     # M*A*S*H
+    582,     # My World and Welcome to It
+    # Drama
+    250307,  # The Pitt
+    126308,  # Shogun
+    76331,   # Succession
+    65494,   # The Crown
+    1399,    # Game of Thrones
+    69478,   # The Handmaid's Tale
+    1396,    # Breaking Bad
+    1407,    # Homeland
+    1104,    # Mad Men
+    1398,    # The Sopranos
+    1973,    # 24
+    4607,    # Lost
+    688,     # The West Wing
+    3050,    # The Practice
+    549,     # Law & Order
+    4588,    # ER
+    194,     # NYPD Blue
+    206,     # Picket Fences
+    4396,    # Northern Exposure
+    732,     # L.A. Law
+    1448,    # thirtysomething
+    4223,    # Cagney & Lacey
+    3828,    # Hill Street Blues
+    480,     # Lou Grant
+    954,     # The Rockford Files
+    492,     # Upstairs Downstairs
+    9855,    # Police Story
+    5021,    # The Waltons
+    1103,    # Elizabeth R
+    3213,    # Marcus Welby M.D.
+    # Limited Series
+    249042,  # Adolescence
+    154385,  # Beef
+    111803,  # The White Lotus
+    87739,   # The Queen's Gambit
+    79788,   # Watchmen
+    87108,   # Chernobyl
+    64513,   # American Crime Story
+    66292,   # Big Little Lies
+    61585,   # Olive Kitteridge
+    60622,   # Fargo
+    33907,   # Downton Abbey
+    16997,   # The Pacific
+    13561,   # Little Dorrit
+    15114,   # John Adams
+    20056,   # Broken Trail
+    13291,   # Elizabeth I
+    13688,   # The Lost Prince
+    11245,   # Angels in America
+    2432,    # Taken
+    4613,    # Band of Brothers
+    21276,   # Anne Frank: The Whole Story
+    20658,   # Arabian Nights
+    814,     # Hornblower
+    3556,    # From the Earth to the Moon
+    11121,   # The Odyssey
+    13675,   # Gulliver's Travels
+}
+
+
+# ---------------------------------------------------------------------------
+# Award parsing from MDblist keywords
+# ---------------------------------------------------------------------------
+
+def parse_mdblist_awards(
+    keywords: list[dict],
+    tmdb_id: int | str | None = None,
+) -> tuple[list[str], list[str]]:
+    """
+    Derive award wins and nominations from MDblist keyword objects.
+
+    Best Picture wins/noms come from keywords:
+        best-picture-winner   → win
+        best-picture-nominated → nom
+
+    Emmy wins come from the hardcoded EMMY_WINNER_TMDB_IDS set.
+    Emmy noms come from EMMY_DRAMA/COMEDY/LIMITED_NOM_TMDB_IDS — Outstanding
+    Series categories only, replacing the broad emmy-award-nominated keyword
+    which fired on acting/directing/writing nominations too.
+
+    Golden Globe wins/noms cover all top film and TV categories via the
+    combined _GG_ALL_WINNERS / _GG_ALL_NOMS sets.
+
+    Returns (wins, noms) where each is a list of human-readable strings.
+    """
+    keyword_names: set[str] = {
+        (kw.get("name") or "").lower().strip()
+        for kw in keywords
+    }
+
+    wins: list[str] = []
+    noms: list[str] = []
+
+    numeric_tmdb_id: int | None = None
+    if tmdb_id is not None:
+        try:
+            numeric_tmdb_id = int(tmdb_id)
+        except (ValueError, TypeError):
+            pass
+
+    # --- Best Picture (Oscar) ---
+    if "best-picture-winner" in keyword_names:
+        wins.append("Oscar Winner")
+    elif "best-picture-nominated" in keyword_names:
+        noms.append("Oscar Nominee")
+
+    # --- Golden Globe (all top film + TV categories) ---
+    if numeric_tmdb_id is not None:
+        if numeric_tmdb_id in _GG_ALL_WINNERS:
+            wins.append("Globe Winner")
+        elif numeric_tmdb_id in _GG_ALL_NOMS:
+            noms.append("Globe Nominee")
+
+    # --- Emmy ---
+    if numeric_tmdb_id is not None and numeric_tmdb_id in EMMY_WINNER_TMDB_IDS:
+        wins.append("Emmy Winner")
+    elif numeric_tmdb_id is not None and numeric_tmdb_id in _EMMY_ALL_NOMS:
+        noms.append("Emmy Nominee")
+
+    return wins, noms
+
+_STAR_WIN_AWARDS: set[str] = set()
+
+
+# Below this Value the source carries no reliable hue (see _frosted_tint); below
+# this Saturation it is essentially white/grey. When the local region is either,
+# a broader fallback region (typically the whole poster) is borrowed so the frost
+# matches a real poster colour instead of going dark/neutral or washing out white.
+_FROST_CONFIDENT_V = 0.22
+# At/above this Saturation a cluster counts as a genuine colour (vs white/grey).
+_FROST_CHROMATIC_S = 0.20
+# A coloured cluster must cover at least this fraction of the region to be chosen
+# over a white/grey majority. Small enough to catch modest colour accents (so the
+# frost leans colour, not white), but above thin title text (e.g. the red "RUN" on
+# an otherwise black-and-white poster) so that doesn't override an honest white.
+_FROST_CHROMATIC_W = 0.08
+# A cluster this dark carries no usable colour for a frosted element — it would
+# only make the frost muddy — so it is skipped entirely.
+_FROST_MIN_V = 0.16
+
+
+def _is_skin_tone(r: float, g: float, b: float) -> bool:
+    """Rough skin-tone test for faces (tan/beige/brown): warm with R>G>B and a
+    moderate saturation. Deliberately excludes vivid reds and oranges so genuine
+    poster colours aren't mistaken for skin. Skin is de-prioritised — but not
+    banned — as a frost colour, since a face shouldn't drive the tint when the
+    poster offers a real colour elsewhere."""
+    import colorsys
+    if not (r > g > b):
+        return False
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    return 0.015 <= h <= 0.11 and 0.20 <= s <= 0.68 and v >= 0.35
+
+
+def _dominant_cluster(
+    region: Image.Image,
+) -> tuple[tuple[float, float, float] | None, float, float, bool]:
+    """Most prominent *actual* colour of a region → ((r,g,b), value, saturation,
+    is_skin).
+
+    Quantises the region into a handful of real colour clusters, rather than
+    taking a flat mean of every pixel — a mean of several distinct colours lands
+    on a muddy grey/brown that appears nowhere in the art (the "invented colour"
+    problem). Near-black clusters are skipped so the tint is never derived from
+    shadows or letterboxing.
+
+    Preference order among clusters that clear _FROST_CHROMATIC_S / _W:
+      1. a genuine non-skin colour   (e.g. a teal background)
+      2. a skin tone                 (only if no other colour qualifies)
+    then, if nothing is chromatic, the best white/grey, then the brightest
+    cluster. So white is only chosen when the region truly has no colour, and a
+    face's skin only when the poster offers nothing else. Returns ``(None, 0, 0,
+    False)`` only for an empty region; the trailing fields let the caller judge
+    reliability and whether the pick was skin."""
+    import colorsys
+    if region.width == 0 or region.height == 0:
+        return None, 0.0, 0.0, False
+    # A modest downsample preserves the real colours; the old heavy-blur + 8x8
+    # mean is exactly what smeared them into an invented average.
+    small = region.convert("RGB")
+    if max(small.size) > 64:
+        small = small.resize((48, 48), Image.Resampling.LANCZOS)
+    try:
+        q = small.quantize(colors=12, method=Image.Quantize.FASTOCTREE)
+    except Exception:
+        q = small.quantize(colors=12)
+    palette = q.getpalette() or []
+    counts  = q.getcolors() or []
+    if not counts or not palette:
+        arr = np.array(small, dtype=np.float32)
+        rgb = (float(arr[:, :, 0].mean()), float(arr[:, :, 1].mean()), float(arr[:, :, 2].mean()))
+        _hh, ss, vv = colorsys.rgb_to_hsv(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
+        return rgb, vv, ss, _is_skin_tone(*rgb)
+
+    total = float(sum(c for c, _ in counts)) or 1.0
+    # best_colour: best non-skin chromatic cluster (preferred).
+    # best_skin:   best skin-tone chromatic cluster (used only if no other colour).
+    # best_any:    best cluster overall incl. white/grey (used if nothing chromatic).
+    best_colour, best_colour_score, best_colour_hsv = None, -1.0, (0.0, 0.0)
+    best_skin, best_skin_score, best_skin_hsv = None, -1.0, (0.0, 0.0)
+    best_any, best_any_score, best_any_hsv = None, -1.0, (0.0, 0.0)
+    brightest, brightest_hsv = None, (-1.0, 0.0)
+    for count, idx in counts:
+        r, g, b = palette[idx * 3:idx * 3 + 3]
+        _h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        if v > brightest_hsv[0]:
+            brightest_hsv, brightest = (v, s), (float(r), float(g), float(b))
+        if v < _FROST_MIN_V:               # near-black — never a tint source
+            continue
+        weight = count / total
+        # Population-led, biased toward *chroma* (saturation × value), not raw
+        # saturation — otherwise a small, dark-but-saturated shadow (e.g. a deep
+        # purple corner) outscores the poster's larger, brighter real palette.
+        score = weight * (0.3 + s * v)
+        rgb = (float(r), float(g), float(b))
+        if score > best_any_score:
+            best_any_score, best_any, best_any_hsv = score, rgb, (v, s)
+        if s >= _FROST_CHROMATIC_S and weight >= _FROST_CHROMATIC_W:
+            if _is_skin_tone(r, g, b):
+                if score > best_skin_score:
+                    best_skin_score, best_skin, best_skin_hsv = score, rgb, (v, s)
+            elif score > best_colour_score:
+                best_colour_score, best_colour, best_colour_hsv = score, rgb, (v, s)
+
+    if best_colour is not None:
+        return best_colour, best_colour_hsv[0], best_colour_hsv[1], False
+    if best_skin is not None:
+        return best_skin, best_skin_hsv[0], best_skin_hsv[1], True
+    if best_any is not None:
+        return best_any, best_any_hsv[0], best_any_hsv[1], False
+    return (brightest or (128.0, 128.0, 128.0)), max(brightest_hsv[0], 0.0), brightest_hsv[1], False
+
+
+def _frost_rank(v: float, s: float, is_skin: bool) -> int:
+    """Desirability of a candidate frost colour, high = better:
+      3 = a genuine non-skin colour   2 = a skin tone
+      1 = white / grey (bright but colourless)   0 = too dark to trust.
+    Used to decide whether the whole-poster fallback beats the local region. A
+    colour is only "too dark to trust" when it is dark AND lacks chroma (near-black
+    noise); a dark but vivid hue (deep navy/teal) stays a usable colour."""
+    if v < _FROST_CONFIDENT_V and v * s < 0.05:
+        return 0
+    if s < _FROST_CHROMATIC_S:
+        return 1
+    return 2 if is_skin else 3
+
+
+def dominant_frost_rgb(
+    region: Image.Image, fallback: Image.Image | None = None
+) -> tuple[float, float, float]:
+    """Representative *actual* colour of a poster region for frosted tinting.
+
+    Returns the region's most prominent real colour (see _dominant_cluster). When
+    that colour is not the best kind available — it's too dark to carry a hue,
+    washed out to white/grey, or merely a skin tone — and a broader ``fallback``
+    region (typically the whole poster) offers a strictly better one (by
+    _frost_rank: real colour > skin > white/grey > dark), that is borrowed
+    instead. This keeps the frost matching a real poster colour, avoiding white
+    and faces whenever the art offers something better, and only ever returns a
+    colour genuinely present in the poster.
+    """
+    rgb, v, s, skin = _dominant_cluster(region)
+    if rgb is None:
+        rgb, v, s, skin = (128.0, 128.0, 128.0), 0.5, 0.0, False
+    if fallback is not None:
+        local_rank = _frost_rank(v, s, skin)
+        if local_rank < 3:
+            fb_rgb, fb_v, fb_s, fb_skin = _dominant_cluster(fallback)
+            if fb_rgb is not None and _frost_rank(fb_v, fb_s, fb_skin) > local_rank:
+                return fb_rgb
+    return rgb
+
+def _frost_ink(r: float, g: float, b: float) -> tuple[int, int, int]:
+    """Label colour for a frosted panel of this colour — dark on light, light on
+    dark.
+
+    Every frosted surface was light by construction until matching let one take a
+    tinted vignette's own colour, which can be genuinely dark; its label has to
+    follow or the badge stops reading.  The threshold sits well below any colour
+    the other two modes produce (their luminance floor is 0.60), so this only ever
+    changes what a matched panel does.
+    """
+    lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return (0, 0, 0) if lum >= 0.45 else (238, 238, 240)
+
+
+def _frosted_tint(
+    dr: float, dg: float, db: float, saturation: float = 1.2,
+    reference: bool | str = False,
+) -> tuple[int, int, int]:
+    """Poster dominant RGB → the frosted tint shared by the bar, notch and sash so
+    they stay consistent.
+
+    Three modes:
+
+    • Saturation (default) — a light "frosted glass" pastel. ``saturation`` scales
+      the source S (1.2 = historical default; 0 = neutral grey). The colour is
+      lifted to ~60 %+ Value and mixed 60/40 with white.
+
+    • Match (``reference="match"``) — the frost is standing in for a colour that
+      is already on the poster (a tinted vignette), so it must be *that colour*,
+      lightness included.  Anything else is visibly a different colour sitting
+      next to it: holding hue and chroma while lifting Value for legibility still
+      reads as pale khaki beside dark olive, because lightness is most of what the
+      eye calls "colour".  So the source is returned as it came, floored only
+      short of black, and the caller flips its label to light ink — see
+      _frost_ink.  ``saturation`` is ignored.
+
+    • Reference (``reference=True``) — hew to the poster's *true* hue and
+      saturation, dropping the pastel whitening so the frost closely matches the
+      art. White is then added only as far as needed to lift the colour to a
+      legibility floor, so the dark frosted text stays readable (an inherently
+      dark hue like deep blue still gets enough white; an already-light gold keeps
+      its full colour). ``saturation`` is ignored in this mode.
+
+    Both key the colour's reliability on *chroma* (value × saturation), not Value,
+    so a near-black noise pixel like (14, 4, 3) fades to neutral (no invented
+    salmon) while a dark-but-vivid navy like (9, 35, 72) keeps its hue."""
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(dr / 255, dg / 255, db / 255)
+    # Confidence the source hue is real, from its chroma (v*s): ~0 below 0.05
+    # (near-black/grey noise), full by 0.18 (a clear hue, however dark).
+    conf = max(0.0, min(1.0, (v * s - 0.05) / 0.13))
+
+    _PANEL_V = 0.85     # how light a dark-text frosted panel has to be
+    _MATCH_MIN_V = 0.12  # ...and how dark a matched one is allowed to get
+
+    if reference == "match":
+        # The source colour, as it is.  Floored just clear of black so the panel
+        # is still a surface rather than a hole; the caller's own gate is what
+        # decides whether there was a colour worth matching in the first place.
+        # No `conf` fade either — that judgement has already been made, and a
+        # source close to neutral should come back close to neutral, not twice
+        # faded.
+        v_out = max(v, _MATCH_MIN_V)
+        return tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h, s, v_out))
+    if reference:
+        # True poster hue + saturation at a bright value, then just enough white
+        # to reach a luminance floor for the dark text — vivid, not pastel.
+        s_eff = min(1.0, s) * conf
+        br, bg, bb = (c * 255 for c in colorsys.hsv_to_rgb(h, s_eff, max(v, _PANEL_V)))
+        # White is added only as far as the dark text needs, so an already-light
+        # colour keeps all of its own.
+        lum = (0.299 * br + 0.587 * bg + 0.114 * bb) / 255
+        _FLOOR = 0.60
+        w = (_FLOOR - lum) / (1.0 - lum) if lum < _FLOOR else 0.0
+        return (int(br * (1 - w) + 255 * w),
+                int(bg * (1 - w) + 255 * w),
+                int(bb * (1 - w) + 255 * w))
+
+    s_eff = min(1.0, s * max(0.0, saturation)) * conf
+    tr, tg, tb = colorsys.hsv_to_rgb(h, s_eff, v * 0.4 + 0.60)
+    return (int(tr*255*0.6 + 255*0.4), int(tg*255*0.6 + 255*0.4), int(tb*255*0.6 + 255*0.4))
+
