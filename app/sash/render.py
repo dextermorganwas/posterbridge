@@ -27,12 +27,12 @@ _TRACKING_RATIO = 0.02
 _BOTTOM_INSET_RATIO = 0.006
 # Horizontal padding inside the pill, either side of the text, as a
 # multiple of the pill's own height.
-_PILL_H_PAD_RATIO = 0.85
+_PILL_H_PAD_RATIO = 0.45
 # Pill can grow up to this fraction of the poster's width for long labels.
 _MAX_PILL_WIDTH_RATIO = 0.62
 # Corner radius as a fraction of the pill's own height — small, so the pill
 # reads as a rounded rectangle/tag rather than a full stadium/capsule.
-_PILL_RADIUS_RATIO = 0.22
+_PILL_RADIUS_RATIO = 0.12
 
 
 def _load_font(size_px: int, font_name: str) -> ImageFont.FreeTypeFont:
