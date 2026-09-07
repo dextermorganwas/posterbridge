@@ -23,6 +23,12 @@ AGPLv3-licensed.
 - `app/sash/imdb_dataset.py` — the IMDb `title.ratings.tsv.gz` dataset
   downloader/refresher and rating lookup. Copied with only import-path
   changes.
+- `app/sash/release_status.py` — the date-based Cinema/Streaming/Physical
+  status computation (`_compute_movie_status_from_dates`) and the tiered
+  cache-TTL scheme (`release_status_expiry`). Adapted to PosterBridge's
+  sqlite selection cache instead of PostersPlus's dedicated tables.
+- `app/sash/digital_release.py` — the r/movieleaks-via-Arctic-Shift early
+  digital-release poller. Copied with only the storage call changed.
 - `app/config.py`'s `effective_cpus()` function (cgroup-aware CPU-limit
   detection). Copied unchanged.
 

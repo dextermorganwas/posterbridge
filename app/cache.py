@@ -43,6 +43,10 @@ def _get_db() -> sqlite3.Connection:
             "CREATE TABLE IF NOT EXISTS selection_cache ("
             "key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at REAL NOT NULL)"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS digital_release_cache ("
+            "imdb_id TEXT PRIMARY KEY, posted_at INTEGER NOT NULL)"
+        )
         conn.commit()
         _local.conn = conn
     return conn
@@ -119,6 +123,38 @@ def prune_expired(now: float | None = None) -> int:
     now = now if now is not None else time.time()
     conn = _get_db()
     cur = conn.execute("DELETE FROM selection_cache WHERE expires_at < ?", (now,))
+    conn.commit()
+    return cur.rowcount
+
+
+# ---------------------------------------------------------------------------
+# Digital-release cache (r/movieleaks early-signal, app/sash/digital_release.py)
+# ---------------------------------------------------------------------------
+
+def is_digital_release(imdb_id: str) -> bool:
+    row = _get_db().execute(
+        "SELECT 1 FROM digital_release_cache WHERE imdb_id = ?", (imdb_id,)
+    ).fetchone()
+    return row is not None
+
+
+def add_digital_releases(entries: list[tuple[str, int]]) -> int:
+    if not entries:
+        return 0
+    conn = _get_db()
+    before = conn.total_changes
+    conn.executemany(
+        "INSERT OR IGNORE INTO digital_release_cache (imdb_id, posted_at) VALUES (?, ?)",
+        entries,
+    )
+    conn.commit()
+    return conn.total_changes - before
+
+
+def prune_digital_releases(max_age_days: int) -> int:
+    cutoff = time.time() - max_age_days * 86400
+    conn = _get_db()
+    cur = conn.execute("DELETE FROM digital_release_cache WHERE posted_at < ?", (cutoff,))
     conn.commit()
     return cur.rowcount
 

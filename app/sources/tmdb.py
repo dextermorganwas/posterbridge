@@ -101,6 +101,12 @@ async def get_details(client: httpx.AsyncClient, media_type: str, tmdb_id: str) 
     return data
 
 
+async def get_release_dates(client: httpx.AsyncClient, tmdb_id: str) -> dict | None:
+    """Raw TMDB /movie/{id}/release_dates payload (theatrical/digital/physical
+    dates per region), used by app.sash.release_status."""
+    return await _get(client, f"/movie/{tmdb_id}/release_dates")
+
+
 async def trending(client: httpx.AsyncClient, media_type: str) -> list[str]:
     """Ordered list of TMDB ids from TMDB's own daily trending endpoint."""
     kind = "tv" if media_type == "tv" else "movie"

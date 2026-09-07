@@ -172,11 +172,9 @@ Whenever you want to change something:
 - Runs as a single process/worker — the IMDb-dataset refresh coordination
   in `app/cache.py` assumes this; don't set uvicorn `--workers` above 1
   without revisiting that.
-- The "release status" sash (Cinema/Streaming/Physical/Production) uses a
-  simple heuristic off TMDB's own `status` + release-date recency, since
-  PostersPlus's finer physical/streaming split relies on a digital-release
-  tracker not included here.
 - Cult Classic / Based on a True Story / Metacritic Must-See sashes require
   an MDBList API key (free tier works) since they're sourced from MDBList's
-  keyword tags — Golden Globe, Emmy, festival, trending, and top-rated
-  sashes don't need one.
+  keyword tags — Golden Globe, Emmy, festival, trending, top-rated, and
+  release-status sashes don't need one.
+- Backdrops and logos never get a sash overlay (only posters do) — this was
+  a bug in the first draft, fixed.

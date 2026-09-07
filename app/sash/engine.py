@@ -7,14 +7,14 @@
 # release_status — to pick a single sash label for a title.
 from __future__ import annotations
 
-import datetime as _dt
 import logging
 
 import httpx
 
-from app.config import SASH_PRIORITY, SASH_PRIORITY_RAW, TOP_RATED_MIN_SCORE
+from app.config import SASH_PRIORITY, SASH_PRIORITY_RAW, TOP_RATED_MIN_SCORE, DIGITAL_RELEASE_ENABLED
 from app.sash import discovery as disc
 from app.sash import imdb_dataset
+from app.sash import release_status as release_status_src
 from app.sash.awards_data import parse_mdblist_awards
 from app.sash.festivals import match_festival_keyword
 from app.sources import mdblist as mdblist_src
@@ -30,35 +30,28 @@ def parse_priority(raw: str | None) -> list[str]:
     return tokens or list(SASH_PRIORITY)
 
 
-def _compute_release_status(details: dict, media_type: str) -> str | None:
-    """Best-effort release_status label from TMDB's own status field —
-    PostersPlus's finer physical/streaming split relies on a digital-release
-    tracker this project doesn't include, so a released movie is bucketed by
-    how recently it opened instead."""
-    status = (details or {}).get("status") or ""
-    if media_type == "tv":
-        return {
-            "Returning Series": "Airing",
-            "Ended": "Ended",
-            "Canceled": "Cancelled",
-            "Cancelled": "Cancelled",
-            "In Production": "Production",
-            "Planned": "Production",
-        }.get(status)
-
-    if status in ("In Production", "Post Production", "Planned"):
-        return "Production"
-    if status == "Released":
-        release_date = details.get("release_date")
-        if release_date:
-            try:
-                d = _dt.date.fromisoformat(release_date)
-                if (_dt.date.today() - d).days <= 45:
-                    return "Cinema"
-            except ValueError:
-                pass
-        return "Streaming"
-    return None
+async def _compute_release_status(
+    client: httpx.AsyncClient, details: dict, media_type: str, tmdb_id: str, imdb_id: str | None
+) -> str | None:
+    """Cinema/Streaming/Physical/Production (movies) or Airing/Ended/
+    Cancelled (TV) — see app/sash/release_status.py (TMDB /release_dates
+    based, adapted from PostersPlus). If DIGITAL_RELEASE_ENABLED, a movie
+    still showing Cinema/Production is upgraded to Streaming when
+    app/sash/digital_release.py's r/movieleaks-derived signal has already
+    seen it announced, ahead of TMDB publishing an official digital date."""
+    status = await release_status_src.fetch_release_status(
+        client, media_type, tmdb_id, details.get("status")
+    )
+    if (
+        DIGITAL_RELEASE_ENABLED
+        and media_type == "movie"
+        and status in ("Cinema", "Production")
+        and imdb_id
+    ):
+        from app.cache import is_digital_release
+        if is_digital_release(imdb_id):
+            return "Streaming"
+    return status
 
 
 async def pick_sash_label(
@@ -81,6 +74,7 @@ async def pick_sash_label(
     wins, noms = parse_mdblist_awards(mdb_keywords, tmdb_id)
 
     rank = await trending_rank(client, media_type, tmdb_id)
+    release_status = await _compute_release_status(client, details, media_type, tmdb_id, imdb_id)
 
     meta = disc.extract_discovery_meta(
         details,
@@ -92,7 +86,7 @@ async def pick_sash_label(
         release_date=details.get("release_date") or details.get("first_air_date"),
         keywords=all_keywords,
         festival_keyword=match_festival_keyword(keyword_names),
-        release_status_override=_compute_release_status(details, media_type),
+        release_status_override=release_status,
     )
 
     # top_rated is new to PosterBridge (IMDb dataset), so it's evaluated

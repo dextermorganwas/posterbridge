@@ -65,6 +65,20 @@ DISCOVERY_OVERRIDES_PATH = os.environ.get(
 )
 
 # ---------------------------------------------------------------------------
+# Release status (Cinema / Streaming / Physical / Production / Airing / Ended
+# / Cancelled) — adapted from PostersPlus tmdb.py + cache.py.
+# ---------------------------------------------------------------------------
+# A theatrical-only film older than this many years is treated as Streaming
+# rather than staying "Cinema" forever (0 disables the downgrade).
+CINEMA_MAX_AGE_YEARS = max(0, _int("CINEMA_MAX_AGE_YEARS", 3))
+# Optional r/movieleaks-derived early "already streaming" signal — see
+# app/sash/digital_release.py. Off by default: it calls a third-party
+# archive API (Arctic Shift) outside TMDB/TVDB/Metahub/MDBList.
+DIGITAL_RELEASE_ENABLED = _bool("DIGITAL_RELEASE_ENABLED", False)
+DIGITAL_RELEASE_MIN_AGE_DAYS = max(0, _int("DIGITAL_RELEASE_MIN_AGE_DAYS", 1))
+DIGITAL_RELEASE_MAX_AGE_DAYS = max(1, _int("DIGITAL_RELEASE_MAX_AGE_DAYS", 30))
+
+# ---------------------------------------------------------------------------
 # Access control
 # ---------------------------------------------------------------------------
 ACCESS_KEY = os.environ.get("ACCESS_KEY", "").strip()  # optional ?access_key= gate on /stats etc.

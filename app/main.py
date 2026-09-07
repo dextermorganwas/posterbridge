@@ -34,11 +34,13 @@ from app.config import (
     HTTP_CACHE_MAX_AGE_SECONDS,
     SASH_ENABLED,
     GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
+    DIGITAL_RELEASE_ENABLED,
     LOG_LEVEL,
 )
 from app.identifiers import parse_ids
 from app.resolver import resolve, ArtKind
 from app.sash import imdb_dataset
+from app.sash.digital_release import digital_release_poll_loop
 from app.sash.engine import pick_sash_label
 from app.sash.render import draw_sash
 
@@ -58,6 +60,11 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(imdb_dataset.imdb_dataset_refresh_loop(app.state.client))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+
+    if DIGITAL_RELEASE_ENABLED:
+        dr_task = asyncio.create_task(digital_release_poll_loop(app.state.client))
+        _background_tasks.add(dr_task)
+        dr_task.add_done_callback(_background_tasks.discard)
 
     logger.info("PosterBridge started")
     try:
@@ -124,7 +131,7 @@ async def _build_response(
             return {"miss": True}
 
         label = None
-        if SASH_ENABLED and kind in ("poster", "backdrop") and art.details:
+        if SASH_ENABLED and kind == "poster" and art.details:
             pick = await pick_sash_label(
                 client,
                 details=art.details,
