@@ -169,9 +169,9 @@ SASH_ENABLED = _bool("SASH_ENABLED", True)
 # "sash" (bottom line + rounded tab, this project's default) — kept as a
 # named mode in case other shapes are added later.
 SASH_MODE = os.environ.get("SASH_MODE", "sash").strip().lower()
-SASH_HEIGHT_RATIO = _float("SASH_HEIGHT_RATIO", 0.075)  # tab height / poster height
-SASH_FONT_SIZE_RATIO = _float("SASH_FONT_SIZE_RATIO", 0.42)
-SASH_BASELINE_HEIGHT_RATIO = _float("SASH_BASELINE_HEIGHT_RATIO", 0.010)  # thin line height
+SASH_HEIGHT_RATIO = _float("SASH_HEIGHT_RATIO", 0.058)  # tab height / poster height
+SASH_FONT_SIZE_RATIO = _float("SASH_FONT_SIZE_RATIO", 0.44)
+SASH_BASELINE_HEIGHT_RATIO = _float("SASH_BASELINE_HEIGHT_RATIO", 0.014)  # thin line height
 SASH_FROST_SATURATION = _float("SASH_FROST_SATURATION", 1.2)
 SASH_TEXT_COLOR = os.environ.get("SASH_TEXT_COLOR", "").strip() or None  # "#RRGGBB" override
 # One of the .ttf filenames in /fonts: Inter-Bold.ttf, Oswald-Bold.ttf,

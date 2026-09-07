@@ -24,7 +24,7 @@ _TRACKING_RATIO = 0.02
 
 # How far above the poster's bottom edge the line sits, as a fraction of
 # poster height.
-_BOTTOM_INSET_RATIO = 0.006
+_BOTTOM_INSET_RATIO = 0.022
 # Horizontal padding inside the pill, either side of the text, as a
 # multiple of the pill's own height.
 _PILL_H_PAD_RATIO = 0.45
