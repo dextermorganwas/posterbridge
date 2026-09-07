@@ -174,6 +174,11 @@ SASH_FONT_SIZE_RATIO = _float("SASH_FONT_SIZE_RATIO", 0.42)
 SASH_BASELINE_HEIGHT_RATIO = _float("SASH_BASELINE_HEIGHT_RATIO", 0.010)  # thin line height
 SASH_FROST_SATURATION = _float("SASH_FROST_SATURATION", 1.2)
 SASH_TEXT_COLOR = os.environ.get("SASH_TEXT_COLOR", "").strip() or None  # "#RRGGBB" override
+# One of the .ttf filenames in /fonts: Inter-Bold.ttf, Oswald-Bold.ttf,
+# Ubuntu-Bold.ttf, BebasNeue-Bold.ttf (bundled from PostersPlus's font set —
+# none of these are a perfect match for Apple TV+'s own SF Pro badges, which
+# aren't redistributable; Oswald-Bold was picked as the closest available).
+SASH_FONT = os.environ.get("SASH_FONT", "Oswald-Bold.ttf").strip()
 
 # Priority order for "one interesting thing" sash selection — first match
 # wins. Copied verbatim from PostersPlus config.py SASH_PRIORITY (the same
@@ -202,11 +207,20 @@ SASH_PRIORITY: list[str] = [
     "mini_series",
     "binge_ready",
     "returning",
-    "release_status",  # airing / cancelled / ended (TV) resolves to one of these
     "airing",
     "cancelled",
     "ended",
     "cinema",
+    # Supported but not enabled by default — every slot below is fully
+    # wired up in app/sash/discovery.py, just not part of the requested
+    # default order. Add any of them to SASH_PRIORITY in .env to enable:
+    #   "trending_broad" — wider trending window than "trending"
+    #   "foreign"         — non-English original-language film
+    #   "physical"        — movie: on physical media
+    #   "streaming"       — movie: on a streaming service (unlike "cinema"
+    #                       above, this is time-boxed release-status, not a
+    #                       structural fallback)
+    #   "production"      — movie: not yet released
 ]
 
 SASH_PRIORITY_RAW = os.environ.get("SASH_PRIORITY")  # comma-separated override, parsed in app/sash/engine.py

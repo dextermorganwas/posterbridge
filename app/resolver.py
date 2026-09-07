@@ -167,19 +167,28 @@ async def resolve(
                     return result
 
     # --- 6: TMDB primary art, any language ---
-    primary_pick = _pick_best(pool) if kind == "backdrop" else _pick_best(
-        images.get({"poster": "posters", "backdrop": "backdrops", "logo": "logos"}[kind], [])
-    )
-    if primary_pick and primary_pick.get("file_path"):
-        result.url, result.source = _tmdb_full_url(primary_pick["file_path"], kind), "tmdb_primary"
-        return result
+    # "Whatever TMDB gives as primary" means its own poster_path/backdrop_path
+    # field (the one designated in the title's own /details response), not a
+    # re-derived "best of all languages" pick — those usually coincide, but
+    # the literal field is what was asked for. Logos have no such single
+    # field on TMDB, so logo still falls back to the best-voted item across
+    # all languages in the images list.
     if kind == "poster" and (details or {}).get("poster_path"):
         result.url, result.source = _tmdb_full_url(details["poster_path"], "poster"), "tmdb_primary"
         return result
-    # No un-tagged fallback for backdrop here: details["backdrop_path"] isn't
-    # guaranteed textless, and backdrops are textless-only at every tier per
-    # spec — an untagged backdrop would defeat that. TVDB primary (below) is
-    # still textless-tagged via select_textless, so it stays the true last resort.
+    if kind == "logo":
+        primary_pick = _pick_best(images.get("logos", []))
+        if primary_pick and primary_pick.get("file_path"):
+            result.url, result.source = _tmdb_full_url(primary_pick["file_path"], "logo"), "tmdb_primary"
+            return result
+    if kind == "backdrop":
+        # Textless pool only (already filtered) — no un-tagged fallback here:
+        # details["backdrop_path"] isn't guaranteed textless, and backdrops
+        # are textless-only at every tier per spec.
+        primary_pick = _pick_best(pool)
+        if primary_pick and primary_pick.get("file_path"):
+            result.url, result.source = _tmdb_full_url(primary_pick["file_path"], "backdrop"), "tmdb_primary"
+            return result
 
     # --- 7: TVDB primary art, any language (backdrops stay textless-only) ---
     if result.tvdb_id:

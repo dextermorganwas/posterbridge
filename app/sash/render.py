@@ -1,47 +1,65 @@
 # app/sash/render.py
 #
 # Draws the sash: a thin line running the full width of the poster near the
-# bottom, with a fully-rounded "pill" sitting on the line in the middle to
-# hold the label text.
-#
-# v2: replaced the original hand-rolled polygon/arc math (which produced a
-# bloated, broken-looking blob) with PIL's own ImageDraw.rounded_rectangle
-# for the pill — a plain capsule shape (radius = half its own height) is a
-# far more robust way to get a clean rounded tab than manually building the
-# outline point-by-point.
+# bottom, with a rounded-rectangle "pill" sitting on the line in the middle
+# to hold the label text.
 from __future__ import annotations
 
 import os
 
 from PIL import Image, ImageDraw, ImageFont
 
-from app.config import SASH_HEIGHT_RATIO, SASH_FONT_SIZE_RATIO, SASH_BASELINE_HEIGHT_RATIO
+from app.config import SASH_HEIGHT_RATIO, SASH_FONT_SIZE_RATIO, SASH_BASELINE_HEIGHT_RATIO, SASH_FONT
 from app.sash.color import sash_colors
 
-_FONT_PATH = os.path.join(
+_FONT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "fonts", "Inter-Bold.ttf",
+    "fonts",
 )
+DEFAULT_FONT = SASH_FONT
 _SS = 3  # supersample factor for crisp curves/text
+# Extra tracking (letter-spacing) between characters, as a fraction of font
+# size. PIL has no built-in letter-spacing, so text is drawn glyph-by-glyph.
+_TRACKING_RATIO = 0.02
 
 # How far above the poster's bottom edge the line sits, as a fraction of
 # poster height.
-_BOTTOM_INSET_RATIO = 0.045
+_BOTTOM_INSET_RATIO = 0.006
 # Horizontal padding inside the pill, either side of the text, as a
 # multiple of the pill's own height.
 _PILL_H_PAD_RATIO = 0.85
 # Pill can grow up to this fraction of the poster's width for long labels.
 _MAX_PILL_WIDTH_RATIO = 0.62
+# Corner radius as a fraction of the pill's own height — small, so the pill
+# reads as a rounded rectangle/tag rather than a full stadium/capsule.
+_PILL_RADIUS_RATIO = 0.22
 
 
-def _load_font(size_px: int) -> ImageFont.FreeTypeFont:
+def _load_font(size_px: int, font_name: str) -> ImageFont.FreeTypeFont:
     try:
-        return ImageFont.truetype(_FONT_PATH, size_px)
+        return ImageFont.truetype(os.path.join(_FONT_DIR, font_name), size_px)
     except IOError:
         return ImageFont.load_default()
 
 
-def draw_sash(image: Image.Image, label: str) -> Image.Image:
+def _tracked_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, tracking: float) -> float:
+    total = 0.0
+    for ch in text:
+        total += draw.textlength(ch, font=font) + tracking
+    return max(0.0, total - tracking)
+
+
+def _draw_tracked(
+    draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str,
+    font: ImageFont.FreeTypeFont, fill: tuple[int, int, int, int], tracking: float,
+) -> None:
+    x, y = xy
+    for ch in text:
+        draw.text((x, y), ch, font=font, fill=fill)
+        x += draw.textlength(ch, font=font) + tracking
+
+
+def draw_sash(image: Image.Image, label: str, *, font_name: str = DEFAULT_FONT) -> Image.Image:
     """Composite the sash onto *image* and return the result (RGBA)."""
     width, height = image.size
     fill, ink = sash_colors(image)
@@ -57,11 +75,13 @@ def draw_sash(image: Image.Image, label: str) -> Image.Image:
     line_cy = ss_h - (height * _BOTTOM_INSET_RATIO * _SS)
 
     font_px = max(10 * _SS, int(pill_h * SASH_FONT_SIZE_RATIO))
-    font = _load_font(font_px)
+    font = _load_font(font_px, font_name)
+    tracking = font_px * _TRACKING_RATIO
+    label_upper = label.upper()
 
-    bbox = draw.textbbox((0, 0), label, font=font)
-    text_w = bbox[2] - bbox[0]
-    text_h = bbox[3] - bbox[1]
+    text_w = _tracked_width(draw, label_upper, font, tracking)
+    ascent, descent = font.getmetrics()
+    text_h = ascent + descent
 
     pill_w = max(pill_h * 1.8, text_w + pill_h * _PILL_H_PAD_RATIO)
     pill_w = min(pill_w, ss_w * _MAX_PILL_WIDTH_RATIO)
@@ -78,17 +98,17 @@ def draw_sash(image: Image.Image, label: str) -> Image.Image:
         fill=(*fill, 255),
     )
 
-    # The pill — a plain capsule (corner radius = half its height).
+    # The pill — a rounded rectangle (small corner radius, not a full capsule).
     draw.rounded_rectangle(
         [(pill_left, pill_top), (pill_right, pill_bottom)],
-        radius=pill_h / 2,
+        radius=pill_h * _PILL_RADIUS_RATIO,
         fill=(*fill, 255),
     )
 
-    # Label, centred in the pill.
-    tx = cx - text_w / 2 - bbox[0]
-    ty = (pill_top + pill_bottom) / 2 - text_h / 2 - bbox[1]
-    draw.text((tx, ty), label, font=font, fill=(*ink, 250))
+    # Label, centred in the pill (tracked/letter-spaced).
+    tx = cx - text_w / 2
+    ty = (pill_top + pill_bottom) / 2 - text_h / 2
+    _draw_tracked(draw, (tx, ty), label_upper, font, (*ink, 250), tracking)
 
     overlay = canvas.resize((width, height), Image.Resampling.LANCZOS)
     result = image.convert("RGBA")
