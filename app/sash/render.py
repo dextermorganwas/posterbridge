@@ -24,7 +24,7 @@ _TRACKING_RATIO = 0.02
 
 # How far above the poster's bottom edge the line sits, as a fraction of
 # poster height.
-_BOTTOM_INSET_RATIO = 0.022
+_BOTTOM_INSET_RATIO = 0.016
 # Horizontal padding inside the pill, either side of the text, as a
 # multiple of the pill's own height.
 _PILL_H_PAD_RATIO = 0.45
@@ -98,11 +98,14 @@ def draw_sash(image: Image.Image, label: str, *, font_name: str = DEFAULT_FONT) 
         fill=(*fill, 255),
     )
 
-    # The pill — a rounded rectangle (small corner radius, not a full capsule).
+    # The pill — rounded on the top two corners only, flat across the
+    # bottom so it flows directly into the line rather than floating above
+    # it as a separate rounded shape.
     draw.rounded_rectangle(
         [(pill_left, pill_top), (pill_right, pill_bottom)],
         radius=pill_h * _PILL_RADIUS_RATIO,
         fill=(*fill, 255),
+        corners=(True, True, False, False),
     )
 
     # Label, centred in the pill (tracked/letter-spaced).
