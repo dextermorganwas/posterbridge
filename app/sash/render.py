@@ -103,14 +103,19 @@ def draw_sash(image: Image.Image, label: str, *, font_name: str = DEFAULT_FONT) 
     pill_w = min(pill_w, ss_w * _MAX_PILL_WIDTH_RATIO)
 
     cx = ss_w / 2
-    pill_bottom = line_cy + line_h / 2
+    line_top = line_cy - line_h / 2
+    line_bottom = line_cy + line_h / 2
+    # Pill sits flush on top of the line — bottom edge meets the line's top
+    # edge exactly, no overlap and no gap (measured off a clean reference
+    # image: the pill and the bar below it share one boundary pixel-for-pixel).
+    pill_bottom = line_top
     pill_top = pill_bottom - pill_h
     pill_left = cx - pill_w / 2
     pill_right = cx + pill_w / 2
 
     # Thin baseline, full width, drawn first so the pill sits on top of it.
     shape_draw.rectangle(
-        [(0, line_cy - line_h / 2), (ss_w, line_cy + line_h / 2)],
+        [(0, line_top), (ss_w, line_bottom)],
         fill=(*fill, 255),
     )
 
@@ -124,9 +129,11 @@ def draw_sash(image: Image.Image, label: str, *, font_name: str = DEFAULT_FONT) 
         corners=(True, True, False, False),
     )
 
-    # Crisp outline on top of the fill — a hard edge in the same colour as
-    # the text, so the shape reads clearly even when its fill is close in
-    # colour to whatever's directly behind it on the poster.
+    # Crisp outline on the pill only — the shadow alone is a soft halo with
+    # no hard edge, so a fill colour close to the background (e.g. a dark
+    # sweater) still reads as camouflaged without this. The line is left
+    # unoutlined: at its thickness, top+bottom outline strokes read as two
+    # separate parallel lines with a gap rather than one bordered bar.
     outline_w = max(1, round(pill_h * _OUTLINE_WIDTH_RATIO))
     outline_color = (*ink, _OUTLINE_ALPHA)
     shape_draw.rounded_rectangle(
@@ -136,8 +143,6 @@ def draw_sash(image: Image.Image, label: str, *, font_name: str = DEFAULT_FONT) 
         width=outline_w,
         corners=(True, True, False, False),
     )
-    shape_draw.line([(0, line_cy - line_h / 2), (ss_w, line_cy - line_h / 2)], fill=outline_color, width=outline_w)
-    shape_draw.line([(0, line_cy + line_h / 2), (ss_w, line_cy + line_h / 2)], fill=outline_color, width=outline_w)
 
     # Drop shadow: a blurred, darkened, downward-offset copy of the shape's
     # own silhouette — keeps the sash readable even when its fill colour is
