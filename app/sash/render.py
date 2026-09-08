@@ -41,6 +41,11 @@ _PILL_RADIUS_RATIO = 0.12
 _SHADOW_BLUR_RATIO = 0.28
 _SHADOW_OFFSET_RATIO = 0.10
 _SHADOW_ALPHA = 130
+# A crisp outline on top of the shadow — the shadow alone is a soft halo
+# and doesn't give a hard edge, so a fill colour close to the background
+# (the maroon-sweater case) still reads as camouflaged without this.
+_OUTLINE_WIDTH_RATIO = 0.045
+_OUTLINE_ALPHA = 150
 
 
 def _load_font(size_px: int, font_name: str) -> ImageFont.FreeTypeFont:
@@ -118,6 +123,21 @@ def draw_sash(image: Image.Image, label: str, *, font_name: str = DEFAULT_FONT) 
         fill=(*fill, 255),
         corners=(True, True, False, False),
     )
+
+    # Crisp outline on top of the fill — a hard edge in the same colour as
+    # the text, so the shape reads clearly even when its fill is close in
+    # colour to whatever's directly behind it on the poster.
+    outline_w = max(1, round(pill_h * _OUTLINE_WIDTH_RATIO))
+    outline_color = (*ink, _OUTLINE_ALPHA)
+    shape_draw.rounded_rectangle(
+        [(pill_left, pill_top), (pill_right, pill_bottom)],
+        radius=pill_h * _PILL_RADIUS_RATIO,
+        outline=outline_color,
+        width=outline_w,
+        corners=(True, True, False, False),
+    )
+    shape_draw.line([(0, line_cy - line_h / 2), (ss_w, line_cy - line_h / 2)], fill=outline_color, width=outline_w)
+    shape_draw.line([(0, line_cy + line_h / 2), (ss_w, line_cy + line_h / 2)], fill=outline_color, width=outline_w)
 
     # Drop shadow: a blurred, darkened, downward-offset copy of the shape's
     # own silhouette — keeps the sash readable even when its fill colour is
